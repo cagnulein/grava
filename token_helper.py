@@ -26,11 +26,11 @@ def get_string_from_file(file):
         with open(path_for_files + file, 'r') as string_from_file:
             global string
             string = string_from_file.read().replace('\n', '')
-            print "...reading " + path_for_files + file
+            print("...reading " + path_for_files + file)
             if not string:
                 sys.exit("...exiting." + path_for_files + file + "is empty")
             else:
-                print "...getting ", string + "\n"
+                print("...getting ", string + "\n")
             return string
     else:
         sys.exit("...exiting. cannot find " + path_for_files + file)
@@ -61,17 +61,19 @@ AUTH_URL = "https://www.strava.com/oauth/token"
 strava_forms = {
     'client_id': client_id,
     'client_secret': strava_secret,
-    'code': auth_code  
+    'code': auth_code,
+    'grant_type': 'authorization_code'
 }
 
 session = requests.session()
 request = requests.post(AUTH_URL, data=strava_forms)
-print "...reading access token from " + AUTH_URL
+print("...reading access token from " + AUTH_URL)
 
 response = request.json()
+print(response)
 token = response['access_token']
-print "...getting access token ",token
+print("...getting access token ",token)
 
 with open(path_for_files + "access_token", "w") as access_token:
         access_token.write(token)
-        print "...writing access token to " + path_for_files + "access_token"
+        print("...writing access token to " + path_for_files + "access_token")
