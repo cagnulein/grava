@@ -4,7 +4,10 @@ import re
 import datetime
 import calendar
 from stravalib.client import Client
+import warnings
+from arrow.factory import ArrowParseWarning
 
+warnings.simplefilter("ignore", ArrowParseWarning)
 ######### Variables ############
 
 path_for_files = "./authfiles/"
@@ -22,14 +25,14 @@ fluxdb = InfluxDBClient(influxhost, influxport, influxuser, influxpassword, infl
 
 
 def initialise_db():
-    print "...create database: ", influxdbname
+    #print "...create database: ", influxdbname
     fluxdb.create_database(influxdbname)
 
     query = "select last(counter) from strava_activity"
-    print "...queying last activity from DB" + influxdbname + " with query: '" + query + "'"
+    #print "...queying last activity from DB" + influxdbname + " with query: '" + query + "'"
 
     result = list(fluxdb.query(query))
-    print "...received result "
+    #print "...received result "
 
     db_results = []
     if result:
@@ -37,7 +40,7 @@ def initialise_db():
         if counter == "None": counter = 0
         for row in result[0]: last_strava_activity = row.get("time")
         
-        print "...last activity in DB " + influxdbname + " is: ", last_strava_activity
+        #print "...last activity in DB " + influxdbname + " is: ", last_strava_activity
 
         db_results.append(counter)
         db_results.append(last_strava_activity)
@@ -45,12 +48,12 @@ def initialise_db():
         counter = 0
         last_strava_activity = "1970-01-01T00:00:01Z"
 
-        print "...empty or no DB. getting all activities since 1970"
+        #print "...empty or no DB. getting all activities since 1970"
         
         db_results.append(counter)
         db_results.append(last_strava_activity)
 
-    print "CCC", db_results
+    #print "CCC", db_results
     return db_results
 
 
@@ -60,9 +63,9 @@ def get_string_from_file(file):
         with open(path_for_files + file, 'r') as string_from_file:
             global string
             string = string_from_file.read().replace('\n', '')
-            print "...reading " + path_for_files + file 
-            print "...reading ", file 
-            print "...getting ", string 
+            #print "...reading " + path_for_files + file 
+            #print "...reading ", file 
+            #print "...getting ", string 
             return string
     else:
         sys.exit("...exiting. cannot find " + path_for_files + file)
@@ -215,13 +218,55 @@ def descriptive_workout_type(workout_type):
     elif workout_type == "11":
         return str("Ride: workout")
 
- 
-
 def write_data_in_db(db_row):
     fluxdb.write_points(db_row)
+    #print("Simulation")
 
+def coordinates_in_bounding_box(coords, latitude_bounds, longitude_bounds):
+    return all([
+        latitude_bounds[0] < coords[0] < latitude_bounds[1],
+        longitude_bounds[0] < coords[1] < longitude_bounds[1],
+    ])
 
+def get_location(latlng):
+    locations = [
+#44.55
+#10.82
+#44.51
+#10.85
+        {
+            'name': 'Home', #44.506348, 10.854744
+            'latitude_bounds': (44.50, 44.52),
+            'longitude_bounds': (10.84, 10.86),
+        }, {
+            'name': 'System', #44.554185, 10.822385
+            'latitude_bounds': (44.54, 44.56),
+            'longitude_bounds': (10.81, 10.83),
+        }
+    ]
 
+    for location in locations:
+        if coordinates_in_bounding_box(latlng, location['latitude_bounds'], location['longitude_bounds']):
+            return location['name']
+
+    return None
+
+def check_commute(activity):
+    global strava
+    start = get_location(activity.start_latlng)
+    end = get_location(activity.end_latlng)
+
+    #print activity.start_latlng[0]
+    #print activity.start_latlng[1]
+    #print activity.end_latlng[0]
+    #print activity.end_latlng[1]
+
+    if start and end and start != end and activity.type=='Ride':
+       print("Force Commute")
+       strava.update_activity(activity.id, commute=True)
+       return True
+
+    return False
 
 def get_and_normalize_gravadata(counter, last_strava_activity):
     athlete = strava.get_athlete()
@@ -234,6 +279,9 @@ def get_and_normalize_gravadata(counter, last_strava_activity):
         counter += 1
         activity_count += 1
  
+        if(activity.commute==False):
+            activity.commute = check_commute(activity)
+
         distance = str(activity.distance)
         straight_length = convert_to_float(distance[:-2])
    
@@ -272,7 +320,7 @@ def get_and_normalize_gravadata(counter, last_strava_activity):
         if avg_temp_desc == "None":
             avg_temp = int(-999)
 
-        
+
         db_row = [{
             'measurement': 'strava_activity',
                 'tags': {
@@ -306,6 +354,10 @@ def get_and_normalize_gravadata(counter, last_strava_activity):
                  },
                 'time': u'{0.start_date}'.format(activity),
                 'fields': {
+                    'start_lat': activity.start_latlng[0],
+                    'start_lng': activity.start_latlng[1],
+                    'end_lat': activity.end_latlng[0],
+                    'end_lng': activity.end_latlng[1],
                     'distance': straight_length,
                     'counter': int(counter),
                     'total_elevation_gain': convert_to_float(elevation[:-2]),
@@ -330,7 +382,6 @@ def get_and_normalize_gravadata(counter, last_strava_activity):
                     'moving_time': convert_to_seconds(u'{0.moving_time}'.format(activity))
                  }
           }]
-        
 
         #print db_row
         print "...write activity id '" + u'{0.id}'.format(activity) + "' of user '" + athletename + "' to database:",influxdbname
@@ -340,18 +391,19 @@ def get_and_normalize_gravadata(counter, last_strava_activity):
 
 ######### Do stuff here ############
 
-print "...initializing database"
+#print "...initializing database"
 gravadata_list = initialise_db()
 
-print "...reading Strava API access token"
+#print "...reading Strava API access token"
 access_token = get_string_from_file('access_token')
 strava.access_token = access_token
 
-print "...retreiving data from strava API and normalize. looking for new activities since", gravadata_list[1]
+#print "...retreiving data from strava API and normalize. looking for new activities since", gravadata_list[1]
 entry_count = get_and_normalize_gravadata(gravadata_list[0], gravadata_list[1])
 
 if entry_count == 0:
-    print "...no new activities. finishing"    
+    #print "...no new activities. finishing"    
+    exit(0)
 else:
     print "...finished filling the database:", influxdbname    
 
